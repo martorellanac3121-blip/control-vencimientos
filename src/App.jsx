@@ -1,3 +1,4 @@
+import GestionTraspaso from './GestionTraspaso';
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
   Scan, 
@@ -94,7 +95,6 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-// Reproduce un sonido tipo "Beep" al escanear exitosamente
 function emitirBeep() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -108,11 +108,10 @@ function emitirBeep() {
     osc.start();
     osc.stop(ctx.currentTime + 0.12);
   } catch (e) {
-    // Si la política del navegador bloquea el audio sin interacción previa
+    // Si la política del navegador bloquea el audio
   }
 }
 
-// Exportación a CSV compatible con Microsoft Excel (UTF-8 con BOM)
 function exportarCSV(lotes) {
   if (!lotes || lotes.length === 0) return false;
 
@@ -161,7 +160,7 @@ function exportarCSV(lotes) {
 }
 
 export default function App() {
-  const [vista, setVista] = useState("ingresar");
+  const [vista, setVista] = useState("ingresar"); // 'ingresar' | 'panel' | 'traspaso'
   const [productos, setProductos] = useState({});
   const [lotes, setLotes] = useState([]);
   const [cargado, setCargado] = useState(false);
@@ -284,7 +283,7 @@ export default function App() {
         }
       `}</style>
 
-      {/* Barra superior comercial */}
+      {/* Barra superior */}
       <Header 
         totalCriticos={totalCriticosYVencidos} 
         onExportar={handleExportar}
@@ -304,13 +303,15 @@ export default function App() {
         )}
 
         {/* Vistas Principales */}
-        {vista === "ingresar" ? (
+        {vista === "ingresar" && (
           <PantallaIngreso 
             productos={productos} 
             onRegistrar={registrarLote} 
             onAbrirCamara={() => setCamaraAbierta(true)}
           />
-        ) : (
+        )}
+
+        {vista === "panel" && (
           <PantallaPanel 
             lotes={lotes} 
             onEliminar={eliminarLote} 
@@ -319,9 +320,17 @@ export default function App() {
             onNuevoRegistro={() => setVista("ingresar")}
           />
         )}
+
+        {vista === "traspaso" && (
+          <GestionTraspaso 
+            lotes={lotes} 
+            productos={productos} 
+            onGuardarLotes={(nuevosLotes) => guardar(productos, nuevosLotes)} 
+          />
+        )}
       </main>
 
-      {/* Navegación Inferior Móvil/Tablet */}
+      {/* Navegación Inferior */}
       <NavInferior vista={vista} setVista={setVista} />
 
       {/* Escáner de Cámara Modal */}
@@ -620,7 +629,6 @@ function PantallaIngreso({ productos, onRegistrar, onAbrirCamara }) {
             </div>
           </div>
 
-          {/* Modal / Integración directa de cámara */}
           {camaraLocal && (
             <CameraScannerModal
               onClose={() => setCamaraLocal(false)}
@@ -719,7 +727,6 @@ function PantallaIngreso({ productos, onRegistrar, onAbrirCamara }) {
 function CameraScannerModal({ onClose, onScan }) {
   const videoRef = useRef(null);
   const [errorMsg, setErrorMsg] = useState(null);
-  const [buscando, setBuscando] = useState(true);
 
   useEffect(() => {
     let stream = null;
@@ -736,7 +743,6 @@ function CameraScannerModal({ onClose, onScan }) {
           await videoRef.current.play();
         }
 
-        // Verificamos si la API nativa BarcodeDetector está disponible
         if ('BarcodeDetector' in window) {
           const barcodeDetector = new window.BarcodeDetector({
             formats: ['code_128', 'ean_13', 'ean_8', 'qr_code', 'upc_a', 'upc_e']
@@ -752,7 +758,7 @@ function CameraScannerModal({ onClose, onScan }) {
                   onScan(rawValue);
                 }
               } catch (e) {
-                // error continuo de frame ignorado
+                // frame ignorado
               }
             }
           }, 350);
@@ -964,7 +970,7 @@ function PantallaPanel({ lotes, onEliminar, onExportar, filtroInicial = "todos",
   );
 }
 
-/* Navegación Inferior Móvil/Tablet */
+/* Navegación Inferior */
 function NavInferior({ vista, setVista }) {
   return (
     <nav style={S.bottomNav}>
@@ -982,11 +988,18 @@ function NavInferior({ vista, setVista }) {
         <ListFilter size={20} />
         <span>Panel e Inventario</span>
       </button>
+      <button
+        onClick={() => setVista("traspaso")}
+        style={{ ...S.navTab, ...(vista === "traspaso" ? S.navTabActive : {}) }}
+      >
+        <RefreshCw size={20} />
+        <span>Retiro a Producción</span>
+      </button>
     </nav>
   );
 }
 
-/* Sistema de Estilos SaaS Ejecutivos */
+/* Estilos */
 const S = {
   appWrapper: {
     minHeight: "100vh",
@@ -1727,7 +1740,7 @@ const S = {
   },
   navTab: {
     flex: 1,
-    maxWidth: 240,
+    maxWidth: 200,
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
