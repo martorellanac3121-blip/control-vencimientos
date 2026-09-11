@@ -403,6 +403,46 @@ export default function App() {
   const [filtroInicial, setFiltroInicial] = useState("todos");
   const [camaraAbierta, setCamaraAbierta] = useState(false);
 
+  // Configurador automático de cabeceras en el DOM (Iconos, Manifest, Theme Color)
+  useEffect(() => {
+    // 1. Favicon SVG para navegadores de escritorio / Pestañas
+    let favicon = document.querySelector("link[rel='icon']");
+    if (!favicon) {
+      favicon = document.createElement("link");
+      favicon.rel = "icon";
+      document.head.appendChild(favicon);
+    }
+    favicon.type = "image/svg+xml";
+    favicon.href = "/favicon.svg";
+
+    // 2. Icono PNG para pantalla de inicio en iOS (iPhone / iPad)
+    let appleIcon = document.querySelector("link[rel='apple-touch-icon']");
+    if (!appleIcon) {
+      appleIcon = document.createElement("link");
+      appleIcon.rel = "apple-touch-icon";
+      document.head.appendChild(appleIcon);
+    }
+    appleIcon.href = "/apple-touch-icon.png";
+
+    // 3. Enlace al manifest.json para Android y soporte PWA
+    let manifestLink = document.querySelector("link[rel='manifest']");
+    if (!manifestLink) {
+      manifestLink = document.createElement("link");
+      manifestLink.rel = "manifest";
+      document.head.appendChild(manifestLink);
+    }
+    manifestLink.href = "/manifest.json";
+
+    // 4. Color de la barra de estado del navegador en celulares
+    let themeColor = document.querySelector("meta[name='theme-color']");
+    if (!themeColor) {
+      themeColor = document.createElement("meta");
+      themeColor.name = "theme-color";
+      document.head.appendChild(themeColor);
+    }
+    themeColor.content = "#0F172A";
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
