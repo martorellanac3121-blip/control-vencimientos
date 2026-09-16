@@ -344,50 +344,43 @@ function GestionTraspaso({ lotes = [], productos = {}, onGuardarLotes }) {
           </button>
         </form>
 
-        {mensaje && (
-          <div style={mensaje.tipo === "ok" ? STraspaso.alertOk : STraspaso.alertError}>
-            {mensaje.tipo === "ok" ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
-            <span>{mensaje.texto}</span>
+        <div style={{ ...STraspaso.card, marginTop: 20, padding: 0, border: "none" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <Layers size={18} color="#4F46E5" />
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Disponible en Bodega ({productosBodega.length})</h3>
           </div>
-        )}
-      </div>
 
-      <div style={{ ...STraspaso.card, marginTop: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-          <Layers size={18} color="#4F46E5" />
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Disponible en Bodega ({productosBodega.length})</h3>
+          {productosBodega.length === 0 ? (
+            <div style={STraspaso.emptyList}>
+              <Package size={32} color="#94A3B8" />
+              <p style={{ margin: "8px 0 0", fontSize: 13, color: "#64748B" }}>
+                No hay stock activo en Bodega.
+              </p>
+            </div>
+          ) : (
+            <div style={STraspaso.productList}>
+              {productosBodega.map((prod) => (
+                <div 
+                  key={prod.barcode} 
+                  style={STraspaso.productItem}
+                  onClick={() => setBarcode(prod.barcode)}
+                  title="Haz clic para seleccionar este producto"
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#0F172A" }}>{prod.nombre}</div>
+                    <div style={{ fontSize: 12, color: "#64748B", fontFamily: "monospace" }}>{prod.barcode} · {prod.categoria}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <span style={STraspaso.stockBadgeBodega}>📦 {prod.stockBodega} un.</span>
+                    {prod.stockProduccion > 0 && (
+                      <span style={STraspaso.stockBadgeProduccion}>🏭 {prod.stockProduccion} un.</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-
-        {productosBodega.length === 0 ? (
-          <div style={STraspaso.emptyList}>
-            <Package size={32} color="#94A3B8" />
-            <p style={{ margin: "8px 0 0", fontSize: 13, color: "#64748B" }}>
-              No hay stock activo en Bodega.
-            </p>
-          </div>
-        ) : (
-          <div style={STraspaso.productList}>
-            {productosBodega.map((prod) => (
-              <div 
-                key={prod.barcode} 
-                style={STraspaso.productItem}
-                onClick={() => setBarcode(prod.barcode)}
-                title="Haz clic para seleccionar este producto"
-              >
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#0F172A" }}>{prod.nombre}</div>
-                  <div style={{ fontSize: 12, color: "#64748B", fontFamily: "monospace" }}>{prod.barcode} · {prod.categoria}</div>
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <span style={STraspaso.stockBadgeBodega}>📦 {prod.stockBodega} un.</span>
-                  {prod.stockProduccion > 0 && (
-                    <span style={STraspaso.stockBadgeProduccion}>🏭 {prod.stockProduccion} un.</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -403,9 +396,7 @@ export default function App() {
   const [filtroInicial, setFiltroInicial] = useState("todos");
   const [camaraAbierta, setCamaraAbierta] = useState(false);
 
-  // Configurador automático de cabeceras en el DOM (Iconos, Manifest, Theme Color)
   useEffect(() => {
-    // 1. Favicon SVG para navegadores de escritorio / Pestañas
     let favicon = document.querySelector("link[rel='icon']");
     if (!favicon) {
       favicon = document.createElement("link");
@@ -415,7 +406,6 @@ export default function App() {
     favicon.type = "image/svg+xml";
     favicon.href = "/favicon.svg";
 
-    // 2. Icono PNG para pantalla de inicio en iOS (iPhone / iPad)
     let appleIcon = document.querySelector("link[rel='apple-touch-icon']");
     if (!appleIcon) {
       appleIcon = document.createElement("link");
@@ -424,7 +414,6 @@ export default function App() {
     }
     appleIcon.href = "/apple-touch-icon.png";
 
-    // 3. Enlace al manifest.json para Android y soporte PWA
     let manifestLink = document.querySelector("link[rel='manifest']");
     if (!manifestLink) {
       manifestLink = document.createElement("link");
@@ -433,7 +422,6 @@ export default function App() {
     }
     manifestLink.href = "/manifest.json";
 
-    // 4. Color de la barra de estado del navegador en celulares
     let themeColor = document.querySelector("meta[name='theme-color']");
     if (!themeColor) {
       themeColor = document.createElement("meta");
@@ -487,20 +475,20 @@ export default function App() {
     setTimeout(() => setToast(null), 3200);
   };
 
-  const registrarLote = ({ barcode, nombre, categoria, fechaVencimiento, cantidad }) => {
+  const registrarLote = ({ barcode, nombre, categoria, fechaVencimiento, cantidad, fechaIngreso }) => {
     const nuevosProductos = { ...productos, [barcode]: { nombre, categoria } };
     const nuevoLote = {
       id: uid(),
       barcode,
       nombre,
       categoria,
-      fechaIngreso: new Date().toISOString().slice(0, 10),
+      fechaIngreso: fechaIngreso || new Date().toISOString().slice(0, 10),
       fechaVencimiento,
       cantidad,
       ubicacion: "bodega"
     };
     guardar(nuevosProductos, [nuevoLote, ...lotes]);
-    mostrarToast(`Ingresado a Bodega: ${nombre} (${cantidad} un.)`, "ok");
+    mostrarToast(`Ingresado a Bodega: ${nombre} (${cantidad} un.) [Llegada: ${nuevoLote.fechaIngreso}]`, "ok");
   };
 
   const eliminarLote = (id) => {
@@ -563,8 +551,10 @@ export default function App() {
         {vista === "ingresar" && (
           <PantallaIngreso 
             productos={productos} 
+            lotes={lotes}
             onRegistrar={registrarLote} 
             onAbrirCamara={() => setCamaraAbierta(true)}
+            onMostrarToast={mostrarToast}
           />
         )}
 
@@ -767,12 +757,13 @@ function ResumenSmartBanner({ lotes, onCerrar, onVerFiltro }) {
   );
 }
 
-function PantallaIngreso({ productos, onRegistrar }) {
+function PantallaIngreso({ productos, lotes, onRegistrar, onAbrirCamara, onMostrarToast }) {
   const [paso, setPaso] = useState("codigo");
   const [barcode, setBarcode] = useState("");
   const [nombre, setNombre] = useState("");
   const [categoria, setCategoria] = useState(CATEGORIAS[0]);
-  const [fecha, setFecha] = useState("");
+  const [fechaIngreso, setFechaIngreso] = useState(new Date().toISOString().slice(0, 10));
+  const [fechaVencimiento, setFechaVencimiento] = useState("");
   const [cantidad, setCantidad] = useState("1");
   const [camaraLocal, setCamaraLocal] = useState(false);
   const inputRef = useRef(null);
@@ -781,15 +772,27 @@ function PantallaIngreso({ productos, onRegistrar }) {
     if (paso === "codigo" && inputRef.current) inputRef.current.focus();
   }, [paso]);
 
-  const productoExistente = productos[barcode];
+  const productoExistente = productos[barcode.trim()];
+
+  // Búsqueda en tiempo real para autorrellenar si ya existe en catálogo
+  const handleBarcodeChange = (val) => {
+    const cleanCode = val.replace(/\s/g, "");
+    setBarcode(cleanCode);
+    
+    if (productos[cleanCode]) {
+      setNombre(productos[cleanCode].nombre);
+      setCategoria(productos[cleanCode].categoria);
+    }
+  };
 
   const continuar = (codeOverride) => {
-    const codeToUse = codeOverride || barcode;
-    if (!codeToUse.trim()) return;
+    const codeToUse = (codeOverride !== undefined ? codeOverride : barcode).trim();
+    if (!codeToUse) return;
     
     if (productos[codeToUse]) {
       setNombre(productos[codeToUse].nombre);
       setCategoria(productos[codeToUse].categoria);
+      onMostrarToast(`¡Producto reconocido! "${productos[codeToUse].nombre}" cargado del historial.`, "ok");
     } else {
       setNombre("");
       setCategoria(CATEGORIAS[0]);
@@ -799,20 +802,24 @@ function PantallaIngreso({ productos, onRegistrar }) {
   };
 
   const confirmar = () => {
-    if (!nombre.trim() || !fecha) return;
+    if (!nombre.trim() || !fechaVencimiento || !fechaIngreso) return;
     onRegistrar({
       barcode: barcode.trim(),
       nombre: nombre.trim(),
       categoria,
-      fechaVencimiento: fecha,
+      fechaVencimiento,
       cantidad: Number(cantidad) || 1,
+      fechaIngreso
     });
     setBarcode("");
     setNombre("");
-    setFecha("");
+    setFechaVencimiento("");
+    setFechaIngreso(new Date().toISOString().slice(0, 10));
     setCantidad("1");
     setPaso("codigo");
   };
+
+  const lotesPreviosMismoProducto = lotes.filter(l => l.barcode === barcode.trim());
 
   return (
     <div style={S.formCard}>
@@ -821,7 +828,7 @@ function PantallaIngreso({ productos, onRegistrar }) {
           <Plus size={20} color="#4F46E5" />
           <h2 style={S.cardTitle}>Ingreso de Productos a Bodega</h2>
         </div>
-        <p style={S.cardSub}>Escanea o ingresa el código de barras para registrar el lote inicial.</p>
+        <p style={S.cardSub}>Escanea o ingresa el código de barras para registrar o asociar lotes.</p>
       </div>
 
       {paso === "codigo" ? (
@@ -832,7 +839,7 @@ function PantallaIngreso({ productos, onRegistrar }) {
               <input
                 ref={inputRef}
                 value={barcode}
-                onChange={(e) => setBarcode(e.target.value.replace(/\s/g, ""))}
+                onChange={(e) => handleBarcodeChange(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && continuar()}
                 placeholder="Código de barra (ej: 780123456789)"
                 inputMode="numeric"
@@ -855,12 +862,20 @@ function PantallaIngreso({ productos, onRegistrar }) {
             </div>
           </div>
 
+          {barcode.trim() && productos[barcode.trim()] && (
+            <div style={S.knownCardNotice}>
+              <Sparkles size={16} color="#4F46E5" />
+              <span>Este código ya fue registrado anteriormente como: <strong>{productos[barcode.trim()].nombre}</strong></span>
+            </div>
+          )}
+
           {camaraLocal && (
             <CameraScannerModal
               onClose={() => setCamaraLocal(false)}
               onScan={(scannedCode) => {
                 setCamaraLocal(false);
                 emitirBeep();
+                handleBarcodeChange(scannedCode);
                 continuar(scannedCode);
               }}
             />
@@ -882,7 +897,7 @@ function PantallaIngreso({ productos, onRegistrar }) {
               <Sparkles size={20} color="#4F46E5" />
               <div>
                 <div style={S.knownName}>{productoExistente.nombre}</div>
-                <div style={S.knownCat}>Categoría: {productoExistente.categoria}</div>
+                <div style={S.knownCat}>Categoría: {productoExistente.categoria} (Reconocido automáticamente)</div>
               </div>
             </div>
           ) : (
@@ -905,32 +920,51 @@ function PantallaIngreso({ productos, onRegistrar }) {
             </>
           )}
 
+          {lotesPreviosMismoProducto.length > 0 && (
+            <div style={S.historyHintBox}>
+              <Layers size={14} color="#D97706" />
+              <span>Nota: Ya existen {lotesPreviosMismoProducto.length} lote(s) previo(s) de este producto en bodega/producción. Este nuevo ingreso tendrá su propio diferenciador de llegada.</span>
+            </div>
+          )}
+
           <div style={S.formRow2Col}>
-            <Field label="Fecha de Vencimiento">
+            <Field label="Fecha de Llegada / Ingreso">
               <div style={S.inputWithIcon}>
                 <Calendar size={18} color="#64748B" />
                 <input
                   type="date"
-                  value={fecha}
-                  onChange={(e) => setFecha(e.target.value)}
+                  value={fechaIngreso}
+                  onChange={(e) => setFechaIngreso(e.target.value)}
                   style={S.formInputNoBorder}
                 />
               </div>
             </Field>
 
-            <Field label="Cantidad / Unidades">
-              <input
-                type="number"
-                min="1"
-                value={cantidad}
-                onChange={(e) => setCantidad(e.target.value)}
-                style={S.formInput}
-              />
+            <Field label="Fecha de Vencimiento">
+              <div style={S.inputWithIcon}>
+                <Calendar size={18} color="#64748B" />
+                <input
+                  type="date"
+                  value={fechaVencimiento}
+                  onChange={(e) => setFechaVencimiento(e.target.value)}
+                  style={S.formInputNoBorder}
+                />
+              </div>
             </Field>
           </div>
 
-          <button type="button" onClick={confirmar} disabled={!nombre.trim() || !fecha} style={S.btnSaveLote}>
-            <Check size={18} /> Registrar en Bodega
+          <Field label="Cantidad / Unidades del Lote">
+            <input
+              type="number"
+              min="1"
+              value={cantidad}
+              onChange={(e) => setCantidad(e.target.value)}
+              style={S.formInput}
+            />
+          </Field>
+
+          <button type="button" onClick={confirmar} disabled={!nombre.trim() || !fechaVencimiento || !fechaIngreso} style={S.btnSaveLote}>
+            <Check size={18} /> Registrar Nuevo Lote en Bodega
           </button>
         </div>
       )}
@@ -1137,7 +1171,7 @@ function PantallaPanel({ lotes, onEliminar, filtroInicial = "todos", onNuevoRegi
       ) : (
         <div style={S.tableContainer}>
           <div style={S.tableHeader}>
-            <span>Producto, Ubicación y Detalles</span>
+            <span>Producto, Ubicación y Lote</span>
             <span>Vencimiento & Estado</span>
           </div>
           <div style={S.tableBody}>
@@ -1156,11 +1190,15 @@ function PantallaPanel({ lotes, onEliminar, filtroInicial = "todos", onNuevoRegi
                       <span style={esProduccion ? S.badgeUbicacionProduccion : S.badgeUbicacionBodega}>
                         {esProduccion ? <><Factory size={12} /> Producción</> : <><Package size={12} /> Bodega</>}
                       </span>
+
+                      <span style={S.badgeLlegada} title="Fecha de llegada de este lote específico">
+                        📥 Llegada: {l.fechaIngreso || 'No registrada'}
+                      </span>
                     </div>
 
                     <div style={S.rowSub}>
                       <span style={S.catBadge}>{l.categoria || 'Sin categoría'}</span>
-                      <span>· {l.cantidad} un. · </span>
+                      <span>· Cantidad: <strong>{l.cantidad} un.</strong> · </span>
                       <span style={S.codeMonospace}>{l.barcode}</span>
                     </div>
                   </div>
@@ -1259,8 +1297,10 @@ const S = {
   codeBadgeLabel: { fontSize: 12, color: "#64748B", fontWeight: 600 },
   codeBadgeVal: { fontSize: 13, fontFamily: "monospace", fontWeight: 700, color: "#0F172A" },
   knownCard: { display: "flex", alignItems: "center", gap: 12, backgroundColor: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 10, padding: 14 },
+  knownCardNotice: { display: "flex", alignItems: "center", gap: 8, backgroundColor: "#F0FDF4", border: "1px solid #BBF7D0", padding: "10px 14px", borderRadius: 8, fontSize: 13, color: "#166534" },
   knownName: { fontSize: 15, fontWeight: 700, color: "#1E1B4B" },
   knownCat: { fontSize: 12, color: "#4338CA" },
+  historyHintBox: { display: "flex", alignItems: "center", gap: 8, backgroundColor: "#FEF3C7", border: "1px solid #FDE68A", padding: "10px 14px", borderRadius: 8, fontSize: 12, color: "#92400E" },
   formInput: { border: "1.5px solid #CBD5E1", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#0F172A", backgroundColor: "#F8FAFC", width: "100%" },
   formInputNoBorder: { border: "none", background: "transparent", fontSize: 14, color: "#0F172A", width: "100%" },
   formSelect: { border: "1.5px solid #CBD5E1", borderRadius: 10, padding: "12px 14px", fontSize: 14, color: "#0F172A", backgroundColor: "#F8FAFC", width: "100%" },
@@ -1304,6 +1344,7 @@ const S = {
   rowTitle: { fontSize: 15, fontWeight: 700, color: "#0F172A" },
   badgeUbicacionBodega: { display: "inline-flex", alignItems: "center", gap: 4, backgroundColor: "#DBEAFE", color: "#1E40AF", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700 },
   badgeUbicacionProduccion: { display: "inline-flex", alignItems: "center", gap: 4, backgroundColor: "#F3E8FF", color: "#6B21A8", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700 },
+  badgeLlegada: { display: "inline-flex", alignItems: "center", gap: 4, backgroundColor: "#FEF3C7", color: "#92400E", padding: "2px 8px", borderRadius: 12, fontSize: 11, fontWeight: 700 },
   rowSub: { fontSize: 12, color: "#64748B", marginTop: 4, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" },
   catBadge: { backgroundColor: "rgba(255,255,255,0.7)", padding: "2px 6px", borderRadius: 4, fontWeight: 600, border: "1px solid rgba(0,0,0,0.06)" },
   codeMonospace: { fontFamily: "monospace", fontWeight: 600 },
