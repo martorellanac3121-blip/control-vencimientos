@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { Html5Qrcode } from "html5-qrcode";
 import { 
   Scan, 
   Package, 
@@ -8,7 +9,7 @@ import {
   RefreshCw, 
   X,
   Layers,
-  Factory
+  Camera
 } from "lucide-react";
 
 function uid() {
@@ -19,22 +20,63 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
   const [barcode, setBarcode] = useState("");
   const [cantidadRetirar, setCantidadRetirar] = useState(1);
   const [mensaje, setMensaje] = useState(null);
+  
+  // Estado y referencia para la cámara
+  const [escaneando, setEscaneando] = useState(false);
+  const scannerRef = useRef(null);
 
-  // Lotes que actualmente están en Bodega para este código
+  // Lotes en Bodega y Producción para este código
   const lotesBodega = lotes.filter(
     (l) => l.barcode === barcode.trim() && (l.ubicacion || "bodega") === "bodega"
   );
-
-  // Lotes que ya están en Producción para este código
   const lotesProduccion = lotes.filter(
     (l) => l.barcode === barcode.trim() && l.ubicacion === "produccion"
   );
 
   const infoProducto = productos[barcode.trim()];
-
-  // Stock disponible en Bodega para traspasar
   const stockBodega = lotesBodega.reduce((acc, l) => acc + (l.cantidad || 0), 0);
   const stockProduccion = lotesProduccion.reduce((acc, l) => acc + (l.cantidad || 0), 0);
+
+  // Inicialización y limpieza de la cámara
+  useEffect(() => {
+    if (escaneando) {
+      const html5Qrcode = new Html5Qrcode("reader");
+      scannerRef.current = html5Qrcode;
+
+      const config = { fps: 10, qrbox: { width: 250, height: 150 } };
+
+      html5Qrcode.start(
+        { facingMode: "environment" }, // Usa la cámara trasera en móviles
+        config,
+        (decodedText) => {
+          setBarcode(decodedText.trim());
+          setMensaje(null);
+          detenerCamara();
+        },
+        () => { /* Ignorar errores continuos de búsqueda */ }
+      ).catch((err) => {
+        console.error("Error al iniciar la cámara:", err);
+        setMensaje({ tipo: "error", texto: "No se pudo acceder a la cámara." });
+        setEscaneando(false);
+      });
+    }
+
+    return () => {
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        scannerRef.current.stop().catch(() => {});
+      }
+    };
+  }, [escaneando]);
+
+  const detenerCamara = () => {
+    if (scannerRef.current && scannerRef.current.isScanning) {
+      scannerRef.current.stop().then(() => {
+        setEscaneando(false);
+      }).catch(() => setEscaneando(false));
+    } else {
+      setEscaneando(false);
+    }
+  };
 
   const handleRetirar = (e) => {
     e.preventDefault();
@@ -53,18 +95,17 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
     if (cant <= 0 || cant > stockBodega) {
       setMensaje({ 
         tipo: "error", 
-        texto: `La cantidad debe ser mayor a 0 y no superar el stock disponible en Bodega (${stockBodega} un.).` 
+        texto: `La cantidad debe ser mayor a 0 y no superar el stock disponible (${stockBodega} un.).` 
       });
       return;
     }
 
-    // Ordenar lotes de bodega por fecha de vencimiento (FEFO)
     const bodegaOrdenados = [...lotesBodega].sort(
       (a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento)
     );
 
     let restante = cant;
-    const deducciones = {}; // loteId -> cantidadTraspasada
+    const deducciones = {};
 
     for (const lote of bodegaOrdenados) {
       if (restante <= 0) break;
@@ -73,7 +114,6 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
       restante -= desc;
     }
 
-    // Reconstruir lista de lotes actualizando ubicaciones
     const nuevosLotes = [];
 
     for (const lote of lotes) {
@@ -81,7 +121,6 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
         const cantTraspasada = deducciones[lote.id];
         const cantSobranteBodega = lote.cantidad - cantTraspasada;
 
-        // Si queda remanente en bodega, mantener lote en bodega con la nueva cantidad
         if (cantSobranteBodega > 0) {
           nuevosLotes.push({
             ...lote,
@@ -90,7 +129,6 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
           });
         }
 
-        // Crear/pasar la fracción traspasada a Producción conservando su fecha de vencimiento
         nuevosLotes.push({
           ...lote,
           id: uid(),
@@ -107,14 +145,13 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
 
     setMensaje({ 
       tipo: "ok", 
-      texto: `Éxito: Se traspasaron ${cant} un. de "${infoProducto?.nombre || barcode}" de Bodega a Producción.` 
+      texto: `Éxito: Se traspasaron ${cant} un. de "${infoProducto?.nombre || barcode}" a Producción.` 
     });
 
     setCantidadRetirar(1);
     setBarcode("");
   };
 
-  // Resumen de productos en Bodega para selección rápida
   const productosBodega = Object.keys(productos)
     .map((code) => {
       const lotesProd = lotes.filter((l) => l.barcode === code && (l.ubicacion || "bodega") === "bodega");
@@ -141,32 +178,60 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
             <h2 style={S.title}>Traspaso de Bodega a Producción</h2>
           </div>
           <p style={S.subtitle}>
-            Al retirar productos, su ubicación cambiará a "Producción". Si están por vencer, seguirán generando alertas.
+            Escanea con la cámara o ingresa el código manualmente.
           </p>
         </div>
 
         <form onSubmit={handleRetirar} style={S.form}>
           <div style={S.field}>
             <label style={S.label}>Código de Barras</label>
-            <div style={S.inputWithIcon}>
-              <Scan size={18} color="#64748B" />
-              <input
-                value={barcode}
-                onChange={(e) => {
-                  setBarcode(e.target.value.replace(/\s/g, ""));
-                  setMensaje(null);
-                }}
-                placeholder="Escanea o escribe el código"
-                style={S.input}
-                autoFocus
-              />
-              {barcode && (
-                <button type="button" onClick={() => setBarcode("")} style={S.clearBtn}>
-                  <X size={16} />
-                </button>
-              )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ ...S.inputWithIcon, flex: 1 }}>
+                <Scan size={18} color="#64748B" />
+                <input
+                  value={barcode}
+                  onChange={(e) => {
+                    setBarcode(e.target.value.replace(/\s/g, ""));
+                    setMensaje(null);
+                  }}
+                  placeholder="Escanea o escribe el código"
+                  style={S.input}
+                  autoFocus
+                />
+                {barcode && (
+                  <button type="button" onClick={() => setBarcode("")} style={S.clearBtn}>
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+
+              {/* Botón para abrir lector de cámara */}
+              <button
+                type="button"
+                onClick={() => setEscaneando(true)}
+                style={S.btnCamera}
+                title="Escanear con Cámara"
+              >
+                <Camera size={20} />
+                <span>Escanear</span>
+              </button>
             </div>
           </div>
+
+          {/* Modal / Visor de la cámara */}
+          {escaneando && (
+            <div style={S.cameraModal}>
+              <div style={S.cameraBox}>
+                <div style={S.cameraHeader}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>Apunta al código de barras</span>
+                  <button type="button" onClick={detenerCamara} style={S.clearBtn}>
+                    <X size={20} />
+                  </button>
+                </div>
+                <div id="reader" style={{ width: "100%" }}></div>
+              </div>
+            </div>
+          )}
 
           {barcode.trim() !== "" && (
             <div style={infoProducto ? S.infoBoxOk : S.infoBoxError}>
@@ -288,6 +353,46 @@ const S = {
     color: "#0F172A",
     fontFamily: "monospace",
     fontWeight: 600,
+  },
+  btnCamera: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#EEF2FF",
+    color: "#4F46E5",
+    border: "1.5px solid #C7D2FE",
+    borderRadius: 10,
+    padding: "0 16px",
+    fontWeight: 700,
+    fontSize: 14,
+    cursor: "pointer",
+  },
+  cameraModal: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(15, 23, 42, 0.75)",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 9999,
+    padding: 16,
+  },
+  cameraBox: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 16,
+    width: "100%",
+    maxWidth: 450,
+    boxShadow: "0 20px 25px -5px rgba(0,0,0,0.3)",
+  },
+  cameraHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
   },
   inputNumber: {
     border: "1.5px solid #CBD5E1",
