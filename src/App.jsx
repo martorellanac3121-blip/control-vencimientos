@@ -344,6 +344,17 @@ function GestionTraspaso({ lotes = [], productos = {}, onGuardarLotes }) {
           </button>
         </form>
 
+        {mensaje && (
+          <div style={mensaje.tipo === "ok" ? STraspaso.alertOk : STraspaso.alertError}>
+            {mensaje.tipo === "ok" ? (
+              <CheckCircle2 size={18} color="#065F46" />
+            ) : (
+              <AlertTriangle size={18} color="#991B1B" />
+            )}
+            <span>{mensaje.texto}</span>
+          </div>
+        )}
+
         <div style={{ ...STraspaso.card, marginTop: 20, padding: 0, border: "none" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <Layers size={18} color="#4F46E5" />
@@ -774,7 +785,6 @@ function PantallaIngreso({ productos, lotes, onRegistrar, onAbrirCamara, onMostr
 
   const productoExistente = productos[barcode.trim()];
 
-  // Búsqueda en tiempo real para autorrellenar si ya existe en catálogo
   const handleBarcodeChange = (val) => {
     const cleanCode = val.replace(/\s/g, "");
     setBarcode(cleanCode);
