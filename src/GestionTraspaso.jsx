@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { 
   Scan, 
-  Package, 
   ArrowRight, 
   CheckCircle2, 
   AlertCircle, 
-  RefreshCw, 
-  X,
-  Layers,
-  Camera
+  X, 
+  Camera, 
+  Calendar, 
+  Check,
+  ChevronRight
 } from "lucide-react";
 
 function uid() {
@@ -18,46 +18,60 @@ function uid() {
 
 export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarLotes }) {
   const [barcode, setBarcode] = useState("");
+  const [codigoConfirmado, setCodigoConfirmado] = useState("");
+  const [loteSeleccionadoId, setLoteSeleccionadoId] = useState(null);
   const [cantidadRetirar, setCantidadRetirar] = useState(1);
   const [mensaje, setMensaje] = useState(null);
+  const [escaneandoCamara, setEscaneandoCamara] = useState(false);
   
-  // Estado y referencia para la cámara
-  const [escaneando, setEscaneando] = useState(false);
   const scannerRef = useRef(null);
 
-  // Lotes en Bodega y Producción para este código
-  const lotesBodega = lotes.filter(
-    (l) => l.barcode === barcode.trim() && (l.ubicacion || "bodega") === "bodega"
-  );
-  const lotesProduccion = lotes.filter(
-    (l) => l.barcode === barcode.trim() && l.ubicacion === "produccion"
+  // Lotes en Bodega del código verificado
+  const lotesDisponibles = lotes.filter(
+    (l) => l.barcode === codigoConfirmado.trim() && (l.ubicacion || "bodega") === "bodega"
   );
 
-  const infoProducto = productos[barcode.trim()];
-  const stockBodega = lotesBodega.reduce((acc, l) => acc + (l.cantidad || 0), 0);
-  const stockProduccion = lotesProduccion.reduce((acc, l) => acc + (l.cantidad || 0), 0);
+  // Ordenados de menor a mayor fecha de ingreso
+  const lotesOrdenadosPorIngreso = [...lotesDisponibles].sort((a, b) => {
+    const fechaA = new Date(a.fechaIngreso || a.fecha || 0);
+    const fechaB = new Date(b.fechaIngreso || b.fecha || 0);
+    return fechaA - fechaB;
+  });
 
-  // Inicialización y limpieza de la cámara
+  const infoProducto = productos[codigoConfirmado.trim()];
+  const loteSeleccionado = lotes.find((l) => l.id === loteSeleccionadoId);
+
+  // Seleccionar automáticamente el lote más antiguo al presionar Continuar o Escanear
   useEffect(() => {
-    if (escaneando) {
+    if (lotesOrdenadosPorIngreso.length > 0) {
+      setLoteSeleccionadoId(lotesOrdenadosPorIngreso[0].id);
+      setCantidadRetirar(1);
+    } else {
+      setLoteSeleccionadoId(null);
+    }
+  }, [codigoConfirmado]);
+
+  // Manejo de Cámara
+  useEffect(() => {
+    if (escaneandoCamara) {
       const html5Qrcode = new Html5Qrcode("reader");
       scannerRef.current = html5Qrcode;
 
-      const config = { fps: 10, qrbox: { width: 250, height: 150 } };
-
       html5Qrcode.start(
-        { facingMode: "environment" }, // Usa la cámara trasera en móviles
-        config,
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 150 } },
         (decodedText) => {
-          setBarcode(decodedText.trim());
+          const codeClean = decodedText.trim();
+          setBarcode(codeClean);
+          setCodigoConfirmado(codeClean);
           setMensaje(null);
           detenerCamara();
         },
-        () => { /* Ignorar errores continuos de búsqueda */ }
+        () => {}
       ).catch((err) => {
-        console.error("Error al iniciar la cámara:", err);
+        console.error("Error al iniciar cámara:", err);
         setMensaje({ tipo: "error", texto: "No se pudo acceder a la cámara." });
-        setEscaneando(false);
+        setEscaneandoCamara(false);
       });
     }
 
@@ -66,73 +80,57 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
         scannerRef.current.stop().catch(() => {});
       }
     };
-  }, [escaneando]);
+  }, [escaneandoCamara]);
 
   const detenerCamara = () => {
     if (scannerRef.current && scannerRef.current.isScanning) {
-      scannerRef.current.stop().then(() => {
-        setEscaneando(false);
-      }).catch(() => setEscaneando(false));
+      scannerRef.current.stop().then(() => setEscaneandoCamara(false)).catch(() => setEscaneandoCamara(false));
     } else {
-      setEscaneando(false);
+      setEscaneandoCamara(false);
     }
   };
 
-  const handleRetirar = (e) => {
-    e.preventDefault();
-    const cant = Number(cantidadRetirar);
-
+  const handleContinuar = (e) => {
+    if (e) e.preventDefault();
     if (!barcode.trim()) {
-      setMensaje({ tipo: "error", texto: "Escanea o ingresa un código de barras." });
+      setMensaje({ tipo: "error", texto: "Ingresa o escanea un código de barras." });
+      return;
+    }
+    setCodigoConfirmado(barcode.trim());
+    setMensaje(null);
+  };
+
+  const handleTraspasarLote = (e) => {
+    e.preventDefault();
+    if (!loteSeleccionado) {
+      setMensaje({ tipo: "error", texto: "Selecciona un lote para continuar." });
       return;
     }
 
-    if (lotesBodega.length === 0 || stockBodega === 0) {
-      setMensaje({ tipo: "error", texto: "No hay stock disponible en Bodega para este código." });
-      return;
-    }
-
-    if (cant <= 0 || cant > stockBodega) {
-      setMensaje({ 
-        tipo: "error", 
-        texto: `La cantidad debe ser mayor a 0 y no superar el stock disponible (${stockBodega} un.).` 
+    const cant = Number(cantidadRetirar);
+    if (cant <= 0 || cant > loteSeleccionado.cantidad) {
+      setMensaje({
+        tipo: "error",
+        texto: `La cantidad debe ser entre 1 y ${loteSeleccionado.cantidad} un.`
       });
       return;
     }
 
-    const bodegaOrdenados = [...lotesBodega].sort(
-      (a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento)
-    );
-
-    let restante = cant;
-    const deducciones = {};
-
-    for (const lote of bodegaOrdenados) {
-      if (restante <= 0) break;
-      const desc = Math.min(lote.cantidad, restante);
-      deducciones[lote.id] = desc;
-      restante -= desc;
-    }
-
     const nuevosLotes = [];
-
     for (const lote of lotes) {
-      if (deducciones[lote.id]) {
-        const cantTraspasada = deducciones[lote.id];
-        const cantSobranteBodega = lote.cantidad - cantTraspasada;
-
-        if (cantSobranteBodega > 0) {
+      if (lote.id === loteSeleccionado.id) {
+        const sobranteBodega = lote.cantidad - cant;
+        if (sobranteBodega > 0) {
           nuevosLotes.push({
             ...lote,
-            cantidad: cantSobranteBodega,
+            cantidad: sobranteBodega,
             ubicacion: "bodega"
           });
         }
-
         nuevosLotes.push({
           ...lote,
           id: uid(),
-          cantidad: cantTraspasada,
+          cantidad: cant,
           ubicacion: "produccion",
           fechaTraspaso: new Date().toISOString().slice(0, 10)
         });
@@ -142,135 +140,183 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
     }
 
     onGuardarLotes(nuevosLotes);
-
-    setMensaje({ 
-      tipo: "ok", 
-      texto: `Éxito: Se traspasaron ${cant} un. de "${infoProducto?.nombre || barcode}" a Producción.` 
+    setMensaje({
+      tipo: "ok",
+      texto: `Éxito: Se traspasaron ${cant} un. del Lote (Ingreso: ${loteSeleccionado.fechaIngreso || loteSeleccionado.fecha || 'N/A'}) a Producción.`
     });
 
-    setCantidadRetirar(1);
     setBarcode("");
+    setCodigoConfirmado("");
+    setLoteSeleccionadoId(null);
+    setCantidadRetirar(1);
   };
-
-  const productosBodega = Object.keys(productos)
-    .map((code) => {
-      const lotesProd = lotes.filter((l) => l.barcode === code && (l.ubicacion || "bodega") === "bodega");
-      const totalBodega = lotesProd.reduce((sum, l) => sum + (l.cantidad || 0), 0);
-      const lotesProdProd = lotes.filter((l) => l.barcode === code && l.ubicacion === "produccion");
-      const totalProduccion = lotesProdProd.reduce((sum, l) => sum + (l.cantidad || 0), 0);
-
-      return {
-        barcode: code,
-        nombre: productos[code].nombre,
-        categoria: productos[code].categoria,
-        stockBodega: totalBodega,
-        stockProduccion: totalProduccion
-      };
-    })
-    .filter((p) => p.stockBodega > 0);
 
   return (
     <div style={S.container}>
       <div style={S.card}>
-        <div style={S.cardHeader}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <RefreshCw size={22} color="#4F46E5" />
-            <h2 style={S.title}>Traspaso de Bodega a Producción</h2>
-          </div>
-          <p style={S.subtitle}>
-            Escanea con la cámara o ingresa el código manualmente.
-          </p>
+        {/* Título e icono estilo + exactamente igual a la imagen */}
+        <div style={S.titleContainer}>
+          <span style={S.plusSign}>+</span>
+          <h2 style={S.title}>Traspaso de Productos a Producción</h2>
         </div>
+        <p style={S.subtitle}>
+          Escanea o ingresa el código de barras para traspasar lotes a producción.
+        </p>
 
-        <form onSubmit={handleRetirar} style={S.form}>
-          <div style={S.field}>
-            <label style={S.label}>Código de Barras</label>
-            <div style={{ display: "flex", gap: 8 }}>
-              <div style={{ ...S.inputWithIcon, flex: 1 }}>
-                <Scan size={18} color="#64748B" />
-                <input
-                  value={barcode}
-                  onChange={(e) => {
-                    setBarcode(e.target.value.replace(/\s/g, ""));
-                    setMensaje(null);
-                  }}
-                  placeholder="Escanea o escribe el código"
-                  style={S.input}
-                  autoFocus
-                />
-                {barcode && (
-                  <button type="button" onClick={() => setBarcode("")} style={S.clearBtn}>
-                    <X size={16} />
-                  </button>
+        {/* Input de código de barras exacto a la imagen */}
+        <form onSubmit={handleContinuar}>
+          <div style={S.inputContainer}>
+            <Scan size={22} color="#64748B" style={{ marginLeft: 12, marginRight: 10 }} />
+            <input
+              value={barcode}
+              onChange={(e) => {
+                setBarcode(e.target.value.replace(/\s/g, ""));
+                if (codigoConfirmado) setCodigoConfirmado("");
+                setMensaje(null);
+              }}
+              placeholder="Código de barra (ej: 780123456789)"
+              style={S.input}
+              autoFocus
+            />
+            {barcode && (
+              <button 
+                type="button" 
+                onClick={() => { setBarcode(""); setCodigoConfirmado(""); }} 
+                style={S.clearBtn}
+              >
+                <X size={18} />
+              </button>
+            )}
+          </div>
+
+          {/* Botones de acción directos calcados de la imagen */}
+          <div style={S.buttonRow}>
+            <button
+              type="button"
+              onClick={() => setEscaneandoCamara(true)}
+              style={S.btnCamera}
+            >
+              <Camera size={20} color="#4F46E5" />
+              <span>Escanear con Cámara</span>
+            </button>
+
+            <button
+              type="submit"
+              style={S.btnContinue}
+            >
+              <span>Continuar</span>
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        </form>
+
+        {/* Modal para la cámara */}
+        {escaneandoCamara && (
+          <div style={S.cameraModal}>
+            <div style={S.cameraBox}>
+              <div style={S.cameraHeader}>
+                <span style={{ fontWeight: 700, fontSize: 14 }}>Apunta al código del producto</span>
+                <button type="button" onClick={detenerCamara} style={S.clearBtn}>
+                  <X size={20} />
+                </button>
+              </div>
+              <div id="reader" style={{ width: "100%" }}></div>
+            </div>
+          </div>
+        )}
+
+        {/* Despliegue de Lotes cuando se presiona Continuar o se Escanea */}
+        {codigoConfirmado !== "" && (
+          <div style={{ marginTop: 24 }}>
+            {infoProducto ? (
+              <div style={S.infoBoxOk}>
+                <div style={S.prodName}>{infoProducto.nombre}</div>
+                <div style={S.prodSub}>
+                  Categoría: {infoProducto.categoria} | Lotes Disponibles en Bodega: <strong>{lotesOrdenadosPorIngreso.length}</strong>
+                </div>
+              </div>
+            ) : (
+              <div style={S.infoBoxError}>
+                <AlertCircle size={18} color="#DC2626" />
+                <span>Producto no encontrado en la base de datos.</span>
+              </div>
+            )}
+
+            {infoProducto && lotesOrdenadosPorIngreso.length > 0 && (
+              <div style={S.lotesSection}>
+                <label style={S.labelGroup}>Selecciona el Lote a Traspasar (Ordenados por Fecha de Ingreso):</label>
+                <div style={S.lotesList}>
+                  {lotesOrdenadosPorIngreso.map((lote, idx) => {
+                    const esSeleccionado = lote.id === loteSeleccionadoId;
+                    const fechaIngresoStr = lote.fechaIngreso || lote.fecha || "Sin fecha";
+                    const fechaVencStr = lote.fechaVencimiento || "Sin vencimiento";
+
+                    return (
+                      <div
+                        key={lote.id}
+                        onClick={() => {
+                          setLoteSeleccionadoId(lote.id);
+                          setCantidadRetirar(1);
+                        }}
+                        style={esSeleccionado ? S.loteCardSelected : S.loteCard}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <Calendar size={16} color={esSeleccionado ? "#4F46E5" : "#64748B"} />
+                            <span style={{ fontWeight: 700, fontSize: 13, color: "#0F172A" }}>
+                              Fecha Ingreso: {fechaIngresoStr}
+                            </span>
+                            {idx === 0 && (
+                              <span style={S.badgeAntiguo}>Más Antiguo</span>
+                            )}
+                          </div>
+                          {esSeleccionado && <Check size={18} color="#4F46E5" />}
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12, color: "#64748B" }}>
+                          <span>Vencimiento: {fechaVencStr}</span>
+                          <span style={{ fontWeight: 700, color: "#1E40AF" }}>
+                            Disponible: {lote.cantidad} un.
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Formulario final para confirmar cantidad */}
+                {loteSeleccionado && (
+                  <form onSubmit={handleTraspasarLote} style={{ marginTop: 18 }}>
+                    <div style={S.field}>
+                      <label style={S.labelGroup}>
+                        Cantidad a Traspasar (Stock lote seleccionado: {loteSeleccionado.cantidad} un.)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max={loteSeleccionado.cantidad}
+                        value={cantidadRetirar}
+                        onChange={(e) => setCantidadRetirar(e.target.value)}
+                        style={S.inputNumber}
+                      />
+                    </div>
+
+                    <button type="submit" style={S.btnSubmit}>
+                      Confirmar Traspaso a Producción <ArrowRight size={18} />
+                    </button>
+                  </form>
                 )}
               </div>
+            )}
 
-              {/* Botón para abrir lector de cámara */}
-              <button
-                type="button"
-                onClick={() => setEscaneando(true)}
-                style={S.btnCamera}
-                title="Escanear con Cámara"
-              >
-                <Camera size={20} />
-                <span>Escanear</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Modal / Visor de la cámara */}
-          {escaneando && (
-            <div style={S.cameraModal}>
-              <div style={S.cameraBox}>
-                <div style={S.cameraHeader}>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>Apunta al código de barras</span>
-                  <button type="button" onClick={detenerCamara} style={S.clearBtn}>
-                    <X size={20} />
-                  </button>
-                </div>
-                <div id="reader" style={{ width: "100%" }}></div>
+            {infoProducto && lotesOrdenadosPorIngreso.length === 0 && (
+              <div style={S.alertError}>
+                <AlertCircle size={18} />
+                <span>Este producto no cuenta con lotes disponibles en Bodega.</span>
               </div>
-            </div>
-          )}
-
-          {barcode.trim() !== "" && (
-            <div style={infoProducto ? S.infoBoxOk : S.infoBoxError}>
-              {infoProducto ? (
-                <div>
-                  <div style={S.prodName}>{infoProducto.nombre}</div>
-                  <div style={S.prodSub}>
-                    Categoría: {infoProducto.categoria} | 📦 En Bodega: <strong>{stockBodega} un.</strong> | 🏭 En Producción: <strong>{stockProduccion} un.</strong>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#DC2626" }}>
-                  <AlertCircle size={18} />
-                  <span>Código no registrado en inventario.</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div style={S.field}>
-            <label style={S.label}>Cantidad a Traspasar a Producción</label>
-            <input
-              type="number"
-              min="1"
-              max={stockBodega > 0 ? stockBodega : 1}
-              value={cantidadRetirar}
-              onChange={(e) => setCantidadRetirar(e.target.value)}
-              style={S.inputNumber}
-            />
+            )}
           </div>
-
-          <button 
-            type="submit" 
-            disabled={!barcode.trim() || stockBodega === 0}
-            style={barcode.trim() && stockBodega > 0 ? S.btnSubmit : S.btnDisabled}
-          >
-            Confirmar Traspaso a Producción <ArrowRight size={18} />
-          </button>
-        </form>
+        )}
 
         {mensaje && (
           <div style={mensaje.tipo === "ok" ? S.alertOk : S.alertError}>
@@ -279,71 +325,31 @@ export default function GestionTraspaso({ lotes = [], productos = {}, onGuardarL
           </div>
         )}
       </div>
-
-      <div style={{ ...S.card, marginTop: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-          <Layers size={18} color="#4F46E5" />
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Disponible en Bodega ({productosBodega.length})</h3>
-        </div>
-
-        {productosBodega.length === 0 ? (
-          <div style={S.emptyList}>
-            <Package size={32} color="#94A3B8" />
-            <p style={{ margin: "8px 0 0", fontSize: 13, color: "#64748B" }}>
-              No hay stock activo en Bodega.
-            </p>
-          </div>
-        ) : (
-          <div style={S.productList}>
-            {productosBodega.map((prod) => (
-              <div 
-                key={prod.barcode} 
-                style={S.productItem}
-                onClick={() => setBarcode(prod.barcode)}
-                title="Haz clic para seleccionar este producto"
-              >
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#0F172A" }}>{prod.nombre}</div>
-                  <div style={{ fontSize: 12, color: "#64748B", fontFamily: "monospace" }}>{prod.barcode} · {prod.categoria}</div>
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <span style={S.stockBadgeBodega}>📦 {prod.stockBodega} un.</span>
-                  {prod.stockProduccion > 0 && (
-                    <span style={S.stockBadgeProduccion}>🏭 {prod.stockProduccion} un.</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
 const S = {
-  container: { maxWidth: 800, margin: "0 auto" },
+  container: { maxWidth: 720, margin: "0 auto", padding: "10px" },
   card: {
     backgroundColor: "#FFFFFF",
     border: "1px solid #E2E8F0",
-    borderRadius: 16,
-    padding: 24,
-    boxShadow: "0 4px 16px rgba(0,0,0,0.03)",
+    borderRadius: 20,
+    padding: "28px 24px",
+    boxShadow: "0 4px 20px rgba(0, 0, 0, 0.02)",
   },
-  cardHeader: { marginBottom: 20 },
-  title: { fontSize: 19, fontWeight: 700, margin: 0, color: "#0F172A" },
-  subtitle: { fontSize: 13, color: "#64748B", marginTop: 6 },
-  form: { display: "flex", flexDirection: "column", gap: 16 },
-  field: { display: "flex", flexDirection: "column", gap: 6 },
-  label: { fontSize: 13, fontWeight: 600, color: "#475569" },
-  inputWithIcon: {
+  titleContainer: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 },
+  plusSign: { fontSize: 22, fontWeight: 700, color: "#4F46E5" },
+  title: { fontSize: 20, fontWeight: 700, margin: 0, color: "#0F172A" },
+  subtitle: { fontSize: 13, color: "#64748B", marginBottom: 20, marginTop: 4, paddingLeft: 18 },
+  inputContainer: {
     display: "flex",
     alignItems: "center",
-    gap: 10,
-    border: "1.5px solid #CBD5E1",
-    borderRadius: 10,
-    padding: "12px 14px",
     backgroundColor: "#F8FAFC",
+    border: "1.5px solid #E2E8F0",
+    borderRadius: 14,
+    padding: "6px 8px",
+    marginBottom: 16,
   },
   input: {
     border: "none",
@@ -351,19 +357,39 @@ const S = {
     fontSize: 15,
     flex: 1,
     color: "#0F172A",
-    fontFamily: "monospace",
-    fontWeight: 600,
+    outline: "none",
+    padding: "10px 0",
+    fontWeight: 500,
   },
+  clearBtn: { border: "none", background: "none", color: "#94A3B8", cursor: "pointer", marginRight: 8 },
+  buttonRow: { display: "flex", gap: 12 },
   btnCamera: {
+    flex: 1,
     display: "flex",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "center",
+    gap: 8,
     backgroundColor: "#EEF2FF",
     color: "#4F46E5",
-    border: "1.5px solid #C7D2FE",
-    borderRadius: 10,
-    padding: "0 16px",
-    fontWeight: 700,
+    border: "1px solid #E0E7FF",
+    borderRadius: 12,
+    padding: "14px 16px",
+    fontWeight: 600,
+    fontSize: 14,
+    cursor: "pointer",
+  },
+  btnContinue: {
+    flex: 1,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#4F46E5",
+    color: "#FFFFFF",
+    border: "none",
+    borderRadius: 12,
+    padding: "14px 16px",
+    fontWeight: 600,
     fontSize: 14,
     cursor: "pointer",
   },
@@ -386,7 +412,6 @@ const S = {
     padding: 16,
     width: "100%",
     maxWidth: 450,
-    boxShadow: "0 20px 25px -5px rgba(0,0,0,0.3)",
   },
   cameraHeader: {
     display: "flex",
@@ -394,20 +419,45 @@ const S = {
     alignItems: "center",
     marginBottom: 12,
   },
+  infoBoxOk: { backgroundColor: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 12, padding: 14 },
+  infoBoxError: { display: "flex", alignItems: "center", gap: 8, backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 12, padding: 14, color: "#DC2626" },
+  prodName: { fontSize: 16, fontWeight: 700, color: "#1E1B4B" },
+  prodSub: { fontSize: 13, color: "#4338CA", marginTop: 4 },
+  lotesSection: { marginTop: 20 },
+  labelGroup: { fontSize: 13, fontWeight: 600, color: "#475569" },
+  lotesList: { display: "flex", flexDirection: "column", gap: 10, marginTop: 10 },
+  loteCard: {
+    padding: 14,
+    borderRadius: 12,
+    border: "1.5px solid #E2E8F0",
+    backgroundColor: "#F8FAFC",
+    cursor: "pointer",
+  },
+  loteCardSelected: {
+    padding: 14,
+    borderRadius: 12,
+    border: "2px solid #4F46E5",
+    backgroundColor: "#EEF2FF",
+    cursor: "pointer",
+  },
+  badgeAntiguo: {
+    backgroundColor: "#FEF3C7",
+    color: "#D97706",
+    fontSize: 11,
+    fontWeight: 700,
+    padding: "2px 8px",
+    borderRadius: 6,
+  },
+  field: { display: "flex", flexDirection: "column", gap: 6 },
   inputNumber: {
     border: "1.5px solid #CBD5E1",
-    borderRadius: 10,
+    borderRadius: 12,
     padding: "12px 14px",
     fontSize: 15,
     backgroundColor: "#F8FAFC",
     color: "#0F172A",
     fontWeight: 600,
   },
-  clearBtn: { border: "none", background: "none", color: "#94A3B8", cursor: "pointer" },
-  infoBoxOk: { backgroundColor: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 10, padding: 12 },
-  infoBoxError: { backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 10, padding: 12 },
-  prodName: { fontSize: 15, fontWeight: 700, color: "#1E1B4B" },
-  prodSub: { fontSize: 12, color: "#4338CA", marginTop: 2 },
   btnSubmit: {
     display: "flex",
     alignItems: "center",
@@ -416,26 +466,13 @@ const S = {
     backgroundColor: "#4F46E5",
     color: "#FFFFFF",
     border: "none",
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 14,
     fontSize: 15,
     fontWeight: 700,
     cursor: "pointer",
-  },
-  btnDisabled: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#94A3B8",
-    color: "#FFFFFF",
-    border: "none",
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: "not-allowed",
-    opacity: 0.7,
+    width: "100%",
+    marginTop: 12,
   },
   alertOk: {
     display: "flex",
@@ -445,7 +482,7 @@ const S = {
     color: "#065F46",
     border: "1px solid #A7F3D0",
     padding: 12,
-    borderRadius: 10,
+    borderRadius: 12,
     marginTop: 16,
     fontSize: 14,
   },
@@ -457,42 +494,8 @@ const S = {
     color: "#991B1B",
     border: "1px solid #FCA5A5",
     padding: 12,
-    borderRadius: 10,
+    borderRadius: 12,
     marginTop: 16,
     fontSize: 14,
-  },
-  productList: { display: "flex", flexDirection: "column", gap: 8 },
-  productItem: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "10px 14px",
-    backgroundColor: "#F8FAFC",
-    border: "1px solid #E2E8F0",
-    borderRadius: 10,
-    cursor: "pointer",
-  },
-  stockBadgeBodega: {
-    backgroundColor: "#DBEAFE",
-    color: "#1E40AF",
-    fontWeight: 700,
-    fontSize: 12,
-    padding: "4px 8px",
-    borderRadius: 6,
-  },
-  stockBadgeProduccion: {
-    backgroundColor: "#F3E8FF",
-    color: "#6B21A8",
-    fontWeight: 700,
-    fontSize: 12,
-    padding: "4px 8px",
-    borderRadius: 6,
-  },
-  emptyList: {
-    textAlign: "center",
-    padding: "24px 12px",
-    backgroundColor: "#F8FAFC",
-    borderRadius: 10,
-    border: "1px dashed #CBD5E1",
   }
 };
