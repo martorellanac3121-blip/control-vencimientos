@@ -21,10 +21,9 @@ import {
   Layers,
   Sparkles,
   RefreshCw,
-  Factory,
-  ArrowRight,
-  AlertCircle
+  Factory
 } from "lucide-react";
+import GestionTraspaso, { CameraScannerModal, resolverCodigo } from "./GestionTraspaso";
 
 const STORAGE_KEY = "vencicontrol_pro_data";
 
@@ -95,21 +94,6 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-function emitirBeep() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(1000, ctx.currentTime);
-    gain.gain.setValueAtTime(0.12, ctx.currentTime);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.12);
-  } catch (e) {}
-}
-
 function exportarCSV(lotes) {
   if (!lotes || lotes.length === 0) return false;
 
@@ -160,243 +144,6 @@ function exportarCSV(lotes) {
   return true;
 }
 
-function GestionTraspaso({ lotes = [], productos = {}, onGuardarLotes }) {
-  const [barcode, setBarcode] = useState("");
-  const [cantidadRetirar, setCantidadRetirar] = useState(1);
-  const [mensaje, setMensaje] = useState(null);
-
-  const lotesBodega = lotes.filter(
-    (l) => l.barcode === barcode.trim() && (l.ubicacion || "bodega") === "bodega"
-  );
-
-  const lotesProduccion = lotes.filter(
-    (l) => l.barcode === barcode.trim() && l.ubicacion === "produccion"
-  );
-
-  const infoProducto = productos[barcode.trim()];
-
-  const stockBodega = lotesBodega.reduce((acc, l) => acc + (l.cantidad || 0), 0);
-  const stockProduccion = lotesProduccion.reduce((acc, l) => acc + (l.cantidad || 0), 0);
-
-  const handleRetirar = (e) => {
-    e.preventDefault();
-    const cant = Number(cantidadRetirar);
-
-    if (!barcode.trim()) {
-      setMensaje({ tipo: "error", texto: "Escanea o ingresa un código de barras." });
-      return;
-    }
-
-    if (lotesBodega.length === 0 || stockBodega === 0) {
-      setMensaje({ tipo: "error", texto: "No hay stock disponible en Bodega para este código." });
-      return;
-    }
-
-    if (cant <= 0 || cant > stockBodega) {
-      setMensaje({ 
-        tipo: "error", 
-        texto: `La cantidad debe ser mayor a 0 y no superar el stock disponible en Bodega (${stockBodega} un.).` 
-      });
-      return;
-    }
-
-    const bodegaOrdenados = [...lotesBodega].sort(
-      (a, b) => new Date(a.fechaVencimiento) - new Date(b.fechaVencimiento)
-    );
-
-    let restante = cant;
-    const deducciones = {};
-
-    for (const lote of bodegaOrdenados) {
-      if (restante <= 0) break;
-      const desc = Math.min(lote.cantidad, restante);
-      deducciones[lote.id] = desc;
-      restante -= desc;
-    }
-
-    const nuevosLotes = [];
-
-    for (const lote of lotes) {
-      if (deducciones[lote.id]) {
-        const cantTraspasada = deducciones[lote.id];
-        const cantSobranteBodega = lote.cantidad - cantTraspasada;
-
-        if (cantSobranteBodega > 0) {
-          nuevosLotes.push({
-            ...lote,
-            cantidad: cantSobranteBodega,
-            ubicacion: "bodega"
-          });
-        }
-
-        nuevosLotes.push({
-          ...lote,
-          id: uid(),
-          cantidad: cantTraspasada,
-          ubicacion: "produccion",
-          fechaTraspaso: new Date().toISOString().slice(0, 10)
-        });
-      } else {
-        nuevosLotes.push(lote);
-      }
-    }
-
-    onGuardarLotes(nuevosLotes);
-
-    setMensaje({ 
-      tipo: "ok", 
-      texto: `Éxito: Se traspasaron ${cant} un. de "${infoProducto?.nombre || barcode}" de Bodega a Producción.` 
-    });
-
-    setCantidadRetirar(1);
-    setBarcode("");
-  };
-
-  const productosBodega = Object.keys(productos)
-    .map((code) => {
-      const lotesProd = lotes.filter((l) => l.barcode === code && (l.ubicacion || "bodega") === "bodega");
-      const totalBodega = lotesProd.reduce((sum, l) => sum + (l.cantidad || 0), 0);
-      const lotesProdProd = lotes.filter((l) => l.barcode === code && l.ubicacion === "produccion");
-      const totalProduccion = lotesProdProd.reduce((sum, l) => sum + (l.cantidad || 0), 0);
-
-      return {
-        barcode: code,
-        nombre: productos[code].nombre,
-        categoria: productos[code].categoria,
-        stockBodega: totalBodega,
-        stockProduccion: totalProduccion
-      };
-    })
-    .filter((p) => p.stockBodega > 0);
-
-  return (
-    <div style={STraspaso.container}>
-      <div style={STraspaso.card}>
-        <div style={STraspaso.cardHeader}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <RefreshCw size={22} color="#4F46E5" />
-            <h2 style={STraspaso.title}>Traspaso de Bodega a Producción</h2>
-          </div>
-          <p style={STraspaso.subtitle}>
-            Al retirar productos, su ubicación cambiará a "Producción". Si están por vencer, seguirán generando alertas.
-          </p>
-        </div>
-
-        <form onSubmit={handleRetirar} style={STraspaso.form}>
-          <div style={STraspaso.field}>
-            <label style={STraspaso.label}>Código de Barras</label>
-            <div style={STraspaso.inputWithIcon}>
-              <Scan size={18} color="#64748B" />
-              <input
-                value={barcode}
-                onChange={(e) => {
-                  setBarcode(e.target.value.replace(/\s/g, ""));
-                  setMensaje(null);
-                }}
-                placeholder="Escanea o escribe el código"
-                style={STraspaso.input}
-                autoFocus
-              />
-              {barcode && (
-                <button type="button" onClick={() => setBarcode("")} style={STraspaso.clearBtn}>
-                  <X size={16} />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {barcode.trim() !== "" && (
-            <div style={infoProducto ? STraspaso.infoBoxOk : STraspaso.infoBoxError}>
-              {infoProducto ? (
-                <div>
-                  <div style={STraspaso.prodName}>{infoProducto.nombre}</div>
-                  <div style={STraspaso.prodSub}>
-                    Categoría: {infoProducto.categoria} | 📦 En Bodega: <strong>{stockBodega} un.</strong> | 🏭 En Producción: <strong>{stockProduccion} un.</strong>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#DC2626" }}>
-                  <AlertCircle size={18} />
-                  <span>Código no registrado en inventario.</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div style={STraspaso.field}>
-            <label style={STraspaso.label}>Cantidad a Traspasar a Producción</label>
-            <input
-              type="number"
-              min="1"
-              max={stockBodega > 0 ? stockBodega : 1}
-              value={cantidadRetirar}
-              onChange={(e) => setCantidadRetirar(e.target.value)}
-              style={STraspaso.inputNumber}
-            />
-          </div>
-
-          <button 
-            type="submit" 
-            disabled={!barcode.trim() || stockBodega === 0}
-            style={barcode.trim() && stockBodega > 0 ? STraspaso.btnSubmit : STraspaso.btnDisabled}
-          >
-            Confirmar Traspaso a Producción <ArrowRight size={18} />
-          </button>
-        </form>
-
-        {mensaje && (
-          <div style={mensaje.tipo === "ok" ? STraspaso.alertOk : STraspaso.alertError}>
-            {mensaje.tipo === "ok" ? (
-              <CheckCircle2 size={18} color="#065F46" />
-            ) : (
-              <AlertTriangle size={18} color="#991B1B" />
-            )}
-            <span>{mensaje.texto}</span>
-          </div>
-        )}
-
-        <div style={{ ...STraspaso.card, marginTop: 20, padding: 0, border: "none" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-            <Layers size={18} color="#4F46E5" />
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Disponible en Bodega ({productosBodega.length})</h3>
-          </div>
-
-          {productosBodega.length === 0 ? (
-            <div style={STraspaso.emptyList}>
-              <Package size={32} color="#94A3B8" />
-              <p style={{ margin: "8px 0 0", fontSize: 13, color: "#64748B" }}>
-                No hay stock activo en Bodega.
-              </p>
-            </div>
-          ) : (
-            <div style={STraspaso.productList}>
-              {productosBodega.map((prod) => (
-                <div 
-                  key={prod.barcode} 
-                  style={STraspaso.productItem}
-                  onClick={() => setBarcode(prod.barcode)}
-                  title="Haz clic para seleccionar este producto"
-                >
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: "#0F172A" }}>{prod.nombre}</div>
-                    <div style={{ fontSize: 12, color: "#64748B", fontFamily: "monospace" }}>{prod.barcode} · {prod.categoria}</div>
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <span style={STraspaso.stockBadgeBodega}>📦 {prod.stockBodega} un.</span>
-                    {prod.stockProduccion > 0 && (
-                      <span style={STraspaso.stockBadgeProduccion}>🏭 {prod.stockProduccion} un.</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [vista, setVista] = useState("ingresar");
   const [productos, setProductos] = useState({});
@@ -405,7 +152,6 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [resumenOculto, setResumenOculto] = useState(false);
   const [filtroInicial, setFiltroInicial] = useState("todos");
-  const [camaraAbierta, setCamaraAbierta] = useState(false);
 
   useEffect(() => {
     let favicon = document.querySelector("link[rel='icon']");
@@ -542,7 +288,6 @@ export default function App() {
         body { margin: 0; background-color: #F8FAFC; }
         input, select, button { font-family: inherit; }
         input:focus, select:focus, button:focus-visible { outline: 2px solid #4F46E5; outline-offset: 1px; }
-        @keyframes pulseBeam { 0% { top: 10%; opacity: 0.3; } 50% { top: 85%; opacity: 1; } 100% { top: 10%; opacity: 0.3; } }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
       `}</style>
 
@@ -564,7 +309,6 @@ export default function App() {
             productos={productos} 
             lotes={lotes}
             onRegistrar={registrarLote} 
-            onAbrirCamara={() => setCamaraAbierta(true)}
             onMostrarToast={mostrarToast}
           />
         )}
@@ -588,16 +332,6 @@ export default function App() {
       </main>
 
       <NavInferior vista={vista} setVista={setVista} />
-
-      {camaraAbierta && (
-        <CameraScannerModal
-          onClose={() => setCamaraAbierta(false)}
-          onScan={(code) => {
-            setCamaraAbierta(false);
-            mostrarToast(`Código detectado: ${code}`, "ok");
-          }}
-        />
-      )}
 
       {toast && (
         <div style={{
@@ -768,7 +502,7 @@ function ResumenSmartBanner({ lotes, onCerrar, onVerFiltro }) {
   );
 }
 
-function PantallaIngreso({ productos, lotes, onRegistrar, onAbrirCamara, onMostrarToast }) {
+function PantallaIngreso({ productos, lotes, onRegistrar, onMostrarToast }) {
   const [paso, setPaso] = useState("codigo");
   const [barcode, setBarcode] = useState("");
   const [nombre, setNombre] = useState("");
@@ -785,6 +519,7 @@ function PantallaIngreso({ productos, lotes, onRegistrar, onAbrirCamara, onMostr
 
   const productoExistente = productos[barcode.trim()];
 
+  // Búsqueda en tiempo real para autorrellenar si ya existe en catálogo
   const handleBarcodeChange = (val) => {
     const cleanCode = val.replace(/\s/g, "");
     setBarcode(cleanCode);
@@ -796,7 +531,7 @@ function PantallaIngreso({ productos, lotes, onRegistrar, onAbrirCamara, onMostr
   };
 
   const continuar = (codeOverride) => {
-    const codeToUse = (codeOverride !== undefined ? codeOverride : barcode).trim();
+    const codeToUse = resolverCodigo(codeOverride !== undefined ? codeOverride : barcode, productos);
     if (!codeToUse) return;
     
     if (productos[codeToUse]) {
@@ -884,9 +619,9 @@ function PantallaIngreso({ productos, lotes, onRegistrar, onAbrirCamara, onMostr
               onClose={() => setCamaraLocal(false)}
               onScan={(scannedCode) => {
                 setCamaraLocal(false);
-                emitirBeep();
-                handleBarcodeChange(scannedCode);
-                continuar(scannedCode);
+                const codigoResuelto = resolverCodigo(scannedCode, productos);
+                handleBarcodeChange(codigoResuelto);
+                continuar(codigoResuelto);
               }}
             />
           )}
@@ -978,90 +713,6 @@ function PantallaIngreso({ productos, lotes, onRegistrar, onAbrirCamara, onMostr
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-function CameraScannerModal({ onClose, onScan }) {
-  const videoRef = useRef(null);
-  const [errorMsg, setErrorMsg] = useState(null);
-
-  useEffect(() => {
-    let stream = null;
-    let intervalId = null;
-
-    async function iniciarCamara() {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
-
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
-
-        if ('BarcodeDetector' in window) {
-          const barcodeDetector = new window.BarcodeDetector({
-            formats: ['code_128', 'ean_13', 'ean_8', 'qr_code', 'upc_a', 'upc_e']
-          });
-
-          intervalId = setInterval(async () => {
-            if (videoRef.current && videoRef.current.readyState === 4) {
-              try {
-                const barcodes = await barcodeDetector.detect(videoRef.current);
-                if (barcodes.length > 0) {
-                  clearInterval(intervalId);
-                  onScan(barcodes[0].rawValue);
-                }
-              } catch (e) {}
-            }
-          }, 350);
-        } else {
-          setErrorMsg("Ingresa el código manualmente si no lee de forma automática.");
-        }
-      } catch (err) {
-        setErrorMsg("No se obtuvo acceso a la cámara.");
-      }
-    }
-
-    iniciarCamara();
-
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-      if (stream) stream.getTracks().forEach((track) => track.stop());
-    };
-  }, [onScan]);
-
-  return (
-    <div style={S.modalOverlay}>
-      <div style={S.modalContainer}>
-        <div style={S.modalHeader}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Camera size={18} color="#4F46E5" />
-            <span style={S.modalTitle}>Escáner de Cámara</span>
-          </div>
-          <button onClick={onClose} style={S.btnCloseModal}><X size={18} /></button>
-        </div>
-
-        <div style={S.cameraViewport}>
-          <video ref={videoRef} style={S.videoElement} playsInline muted />
-          <div style={S.scannerOverlay}>
-            <div style={S.scanBoxFrame}><div style={S.scanBeamLine} /></div>
-          </div>
-        </div>
-
-        {errorMsg && (
-          <div style={S.cameraErrorBox}>
-            <AlertTriangle size={16} color="#DC2626" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        <div style={S.modalFooter}>
-          <button onClick={onClose} style={S.btnSecondaryModal}>Cerrar</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1318,19 +969,6 @@ const S = {
   fieldGroup: { display: "flex", flexDirection: "column", gap: 6 },
   fieldLabel: { fontSize: 13, fontWeight: 600, color: "#475569" },
   btnSaveLote: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: "#059669", color: "#FFFFFF", border: "none", borderRadius: 10, padding: "14px", fontSize: 15, fontWeight: 700, cursor: "pointer", marginTop: 8 },
-  modalOverlay: { position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(15, 23, 42, 0.75)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999, padding: 16 },
-  modalContainer: { backgroundColor: "#FFFFFF", borderRadius: 16, width: "100%", maxWidth: 480, padding: 20, boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)" },
-  modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
-  modalTitle: { fontSize: 16, fontWeight: 700, color: "#0F172A" },
-  btnCloseModal: { border: "none", background: "none", cursor: "pointer", color: "#64748B" },
-  cameraViewport: { position: "relative", width: "100%", height: 260, backgroundColor: "#000", borderRadius: 12, overflow: "hidden" },
-  videoElement: { width: "100%", height: "100%", objectFit: "cover" },
-  scannerOverlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center" },
-  scanBoxFrame: { width: 220, height: 140, border: "2px dashed #6366F1", borderRadius: 12, position: "relative", backgroundColor: "rgba(99, 102, 241, 0.1)" },
-  scanBeamLine: { position: "absolute", left: "5%", width: "90%", height: "2px", backgroundColor: "#EF4444", boxShadow: "0 0 8px #EF4444", animation: "pulseBeam 2s infinite ease-in-out" },
-  cameraErrorBox: { display: "flex", alignItems: "center", gap: 8, backgroundColor: "#FEF2F2", color: "#991B1B", padding: 12, borderRadius: 8, marginTop: 12, fontSize: 13 },
-  modalFooter: { marginTop: 14, display: "flex", justifyContent: "flex-end" },
-  btnSecondaryModal: { backgroundColor: "#F1F5F9", color: "#475569", border: "none", padding: "10px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" },
   panelWrapper: { display: "flex", flexDirection: "column", gap: 16 },
   filtersBar: { display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 },
   filterChip: { flexShrink: 0, border: "1px solid #E2E8F0", backgroundColor: "#FFFFFF", color: "#64748B", fontSize: 13, fontWeight: 600, padding: "8px 14px", borderRadius: 20, cursor: "pointer" },
@@ -1368,140 +1006,4 @@ const S = {
   navTabActive: { color: "#4F46E5", backgroundColor: "#EEF2FF" },
   toast: { position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", backgroundColor: "#0F172A", color: "#FFFFFF", padding: "12px 18px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3)", zIndex: 1000, maxWidth: "90%" },
   toastText: { fontSize: 14, fontWeight: 500 }
-};
-
-const STraspaso = {
-  container: { maxWidth: 800, margin: "0 auto" },
-  card: {
-    backgroundColor: "#FFFFFF",
-    border: "1px solid #E2E8F0",
-    borderRadius: 16,
-    padding: 24,
-    boxShadow: "0 4px 16px rgba(0,0,0,0.03)",
-  },
-  cardHeader: { marginBottom: 20 },
-  title: { fontSize: 19, fontWeight: 700, margin: 0, color: "#0F172A" },
-  subtitle: { fontSize: 13, color: "#64748B", marginTop: 6 },
-  form: { display: "flex", flexDirection: "column", gap: 16 },
-  field: { display: "flex", flexDirection: "column", gap: 6 },
-  label: { fontSize: 13, fontWeight: 600, color: "#475569" },
-  inputWithIcon: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    border: "1.5px solid #CBD5E1",
-    borderRadius: 10,
-    padding: "12px 14px",
-    backgroundColor: "#F8FAFC",
-  },
-  input: {
-    border: "none",
-    background: "transparent",
-    fontSize: 15,
-    flex: 1,
-    color: "#0F172A",
-    fontFamily: "monospace",
-    fontWeight: 600,
-  },
-  inputNumber: {
-    border: "1.5px solid #CBD5E1",
-    borderRadius: 10,
-    padding: "12px 14px",
-    fontSize: 15,
-    backgroundColor: "#F8FAFC",
-    color: "#0F172A",
-    fontWeight: 600,
-  },
-  clearBtn: { border: "none", background: "none", color: "#94A3B8", cursor: "pointer" },
-  infoBoxOk: { backgroundColor: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 10, padding: 12 },
-  infoBoxError: { backgroundColor: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 10, padding: 12 },
-  prodName: { fontSize: 15, fontWeight: 700, color: "#1E1B4B" },
-  prodSub: { fontSize: 12, color: "#4338CA", marginTop: 2 },
-  btnSubmit: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#4F46E5",
-    color: "#FFFFFF",
-    border: "none",
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  btnDisabled: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#94A3B8",
-    color: "#FFFFFF",
-    border: "none",
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: "not-allowed",
-    opacity: 0.7,
-  },
-  alertOk: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#ECFDF5",
-    color: "#065F46",
-    border: "1px solid #A7F3D0",
-    padding: 12,
-    borderRadius: 10,
-    marginTop: 16,
-    fontSize: 14,
-  },
-  alertError: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#FEF2F2",
-    color: "#991B1B",
-    border: "1px solid #FCA5A5",
-    padding: 12,
-    borderRadius: 10,
-    marginTop: 16,
-    fontSize: 14,
-  },
-  productList: { display: "flex", flexDirection: "column", gap: 8 },
-  productItem: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "10px 14px",
-    backgroundColor: "#F8FAFC",
-    border: "1px solid #E2E8F0",
-    borderRadius: 10,
-    cursor: "pointer",
-  },
-  stockBadgeBodega: {
-    backgroundColor: "#DBEAFE",
-    color: "#1E40AF",
-    fontWeight: 700,
-    fontSize: 12,
-    padding: "4px 8px",
-    borderRadius: 6,
-  },
-  stockBadgeProduccion: {
-    backgroundColor: "#F3E8FF",
-    color: "#6B21A8",
-    fontWeight: 700,
-    fontSize: 12,
-    padding: "4px 8px",
-    borderRadius: 6,
-  },
-  emptyList: {
-    textAlign: "center",
-    padding: "24px 12px",
-    backgroundColor: "#F8FAFC",
-    borderRadius: 10,
-    border: "1px dashed #CBD5E1",
-  }
 };
