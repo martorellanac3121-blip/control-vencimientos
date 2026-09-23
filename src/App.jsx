@@ -248,9 +248,26 @@ export default function App() {
     mostrarToast(`Ingresado a Bodega: ${nombre} (${cantidad} un.) [Llegada: ${nuevoLote.fechaIngreso}]`, "ok");
   };
 
-  const eliminarLote = (id) => {
-    guardar(productos, lotes.filter((l) => l.id !== id));
-    mostrarToast("Registro descartado del sistema.", "ok");
+  const eliminarLote = (id, confirmar = false) => {
+    const lote = lotes.find((l) => l.id === id);
+    if (!lote) return;
+
+    if (!confirmar) return;
+
+    const lotesRestantes = lotes.filter((l) => l.id !== id);
+
+    const quedanLotesDelProducto = lotesRestantes.some((l) => l.barcode === lote.barcode);
+    const nuevosProductos = quedanLotesDelProducto
+      ? productos
+      : Object.fromEntries(Object.entries(productos).filter(([k]) => k !== lote.barcode));
+
+    guardar(nuevosProductos, lotesRestantes);
+
+    const ubi = lote.ubicacion === "produccion" ? "Producción" : "Bodega";
+    const msg = quedanLotesDelProducto
+      ? `Lote eliminado de ${ubi}: ${lote.nombre} (${lote.cantidad} un.).`
+      : `Lote eliminado y producto retirado del catálogo: ${lote.nombre}.`;
+    mostrarToast(msg, "ok");
   };
 
   const handleExportar = () => {
@@ -316,7 +333,8 @@ export default function App() {
         {vista === "panel" && (
           <PantallaPanel 
             lotes={lotes} 
-            onEliminar={eliminarLote} 
+            productos={productos}
+            onEliminar={(id) => eliminarLote(id, true)} 
             filtroInicial={filtroInicial}
             onNuevoRegistro={() => setVista("ingresar")}
           />
@@ -326,7 +344,8 @@ export default function App() {
           <GestionTraspaso 
             lotes={lotes} 
             productos={productos} 
-            onGuardarLotes={(nuevosLotes) => guardar(productos, nuevosLotes)} 
+            onGuardarLotes={(nuevosLotes) => guardar(productos, nuevosLotes)}
+            onEliminarLote={(id) => eliminarLote(id, true)}
           />
         )}
       </main>
@@ -519,7 +538,6 @@ function PantallaIngreso({ productos, lotes, onRegistrar, onMostrarToast }) {
 
   const productoExistente = productos[barcode.trim()];
 
-  // Búsqueda en tiempo real para autorrellenar si ya existe en catálogo
   const handleBarcodeChange = (val) => {
     const cleanCode = val.replace(/\s/g, "");
     setBarcode(cleanCode);
@@ -726,10 +744,11 @@ function Field({ label, children }) {
   );
 }
 
-function PantallaPanel({ lotes, onEliminar, filtroInicial = "todos", onNuevoRegistro }) {
+function PantallaPanel({ lotes, productos = {}, onEliminar, filtroInicial = "todos", onNuevoRegistro }) {
   const [busqueda, setBusqueda] = useState("");
   const [filtroUrgencia, setFiltroUrgencia] = useState(filtroInicial);
   const [filtroUbicacion, setFiltroUbicacion] = useState("todas");
+  const [confirmarId, setConfirmarId] = useState(null);
 
   useEffect(() => {
     if (filtroInicial) setFiltroUrgencia(filtroInicial);
@@ -874,9 +893,36 @@ function PantallaPanel({ lotes, onEliminar, filtroInicial = "todos", onNuevoRegi
                       {dias < 0 ? `Vencido hace ${Math.abs(dias)}d` : dias === 0 ? "¡Vence HOY!" : `Vence en ${dias}d`}
                     </span>
 
-                    <button onClick={() => onEliminar(l.id)} style={S.btnDeleteRow} title="Descartar lote">
-                      <Trash2 size={15} />
-                    </button>
+                    {confirmarId === l.id ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 12, color: "#EF4444", fontWeight: 600 }}>¿Eliminar?</span>
+                        <button 
+                          onClick={() => {
+                            onEliminar(l.id);
+                            setConfirmarId(null);
+                          }} 
+                          style={{ ...S.btnDeleteRow, color: "#DC2626", backgroundColor: "#FEE2E2" }} 
+                          title="Sí, eliminar lote"
+                        >
+                          <Check size={15} />
+                        </button>
+                        <button 
+                          onClick={() => setConfirmarId(null)} 
+                          style={S.btnDeleteRow} 
+                          title="Cancelar"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmarId(l.id)}
+                        style={S.btnDeleteRow}
+                        title="Eliminar lote"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
