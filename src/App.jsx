@@ -21,7 +21,8 @@ import {
   Layers,
   Sparkles,
   RefreshCw,
-  Factory
+  Factory,
+  Upload
 } from "lucide-react";
 import GestionTraspaso, { CameraScannerModal, resolverCodigo } from "./GestionTraspaso";
 
@@ -142,6 +143,55 @@ function exportarCSV(lotes) {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
   return true;
+}
+
+function importarCSV(contenidoCSV, productosActuales, lotesActuales) {
+  const lineas = contenidoCSV.split(/\r?\n/).filter((linea) => linea.trim() !== "");
+  if (lineas.length <= 1) {
+    return { exito: false, mensaje: "El archivo CSV está vacío o solo contiene encabezados." };
+  }
+
+  const nuevosProductos = { ...productosActuales };
+  const nuevosLotes = [...lotesActuales];
+  let contadorImportados = 0;
+
+  for (let i = 1; i < lineas.length; i++) {
+    const linea = lineas[i];
+    const columnas = linea.split(";").map((col) => col.replace(/^"|"$/g, "").trim());
+
+    if (columnas.length >= 7) {
+      const barcode = columnas[0];
+      const nombre = columnas[1];
+      const categoria = columnas[2] || "Otro";
+      const ubicacionTxt = columnas[3];
+      const cantidad = parseInt(columnas[4], 10) || 1;
+      const fechaIngreso = columnas[5] !== "-" ? columnas[5] : new Date().toISOString().slice(0, 10);
+      const fechaVencimiento = columnas[6];
+
+      if (barcode && nombre && fechaVencimiento) {
+        nuevosProductos[barcode] = { nombre, categoria };
+
+        nuevosLotes.push({
+          id: uid(),
+          barcode,
+          nombre,
+          categoria,
+          fechaIngreso,
+          fechaVencimiento,
+          cantidad,
+          ubicacion: ubicacionTxt === "Producción" ? "produccion" : "bodega"
+        });
+        contadorImportados++;
+      }
+    }
+  }
+
+  return {
+    exito: true,
+    nuevosProductos,
+    nuevosLotes,
+    contadorImportados
+  };
 }
 
 export default function App() {
@@ -279,6 +329,26 @@ export default function App() {
     if (exito) mostrarToast("Reporte descargado con éxito.", "ok");
   };
 
+  const handleImportarCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const contenido = evt.target.result;
+      const resultado = importarCSV(contenido, productos, lotes);
+
+      if (resultado.exito) {
+        guardar(resultado.nuevosProductos, resultado.nuevosLotes);
+        mostrarToast(`¡Éxito! Se importaron ${resultado.contadorImportados} lote(s) correctamente.`, "ok");
+      } else {
+        mostrarToast(resultado.mensaje || "Error al leer el archivo CSV.", "error");
+      }
+    };
+    reader.readAsText(file, "UTF-8");
+    e.target.value = "";
+  };
+
   const irAPanelConFiltro = (filtro) => {
     setFiltroInicial(filtro);
     setVista("panel");
@@ -308,7 +378,11 @@ export default function App() {
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
       `}</style>
 
-      <Header totalCriticos={totalCriticosYVencidos} onExportar={handleExportar} />
+      <Header 
+        totalCriticos={totalCriticosYVencidos} 
+        onExportar={handleExportar} 
+        onImportarCSV={handleImportarCSV}
+      />
 
       <main style={S.mainContainer}>
         <KpiDashboard lotes={lotes} onVerFiltro={irAPanelConFiltro} />
@@ -365,7 +439,9 @@ export default function App() {
   );
 }
 
-function Header({ totalCriticos, onExportar }) {
+function Header({ totalCriticos, onExportar, onImportarCSV }) {
+  const fileInputRef = useRef(null);
+
   return (
     <header style={S.header}>
       <div style={S.headerBrand}>
@@ -381,6 +457,23 @@ function Header({ totalCriticos, onExportar }) {
       </div>
 
       <div style={S.headerActions}>
+        <input
+          type="file"
+          accept=".csv"
+          ref={fileInputRef}
+          onChange={onImportarCSV}
+          style={{ display: "none" }}
+        />
+
+        <button 
+          onClick={() => fileInputRef.current && fileInputRef.current.click()} 
+          style={S.btnExportHeader} 
+          title="Importar y unificar reporte CSV"
+        >
+          <Upload size={16} />
+          <span style={S.btnExportText}>Importar CSV</span>
+        </button>
+
         <button onClick={onExportar} style={S.btnExportHeader} title="Exportar reporte CSV">
           <FileSpreadsheet size={16} />
           <span style={S.btnExportText}>Exportar CSV</span>
